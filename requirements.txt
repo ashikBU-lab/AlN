@@ -1,0 +1,30 @@
+# Python 3.10 environment for fitting a UF3 potential with UF3Tools.
+#   conda create -n uf3_aln python=3.10 -y
+#   conda activate uf3_aln
+#   pip install -r requirements.txt
+# All packages have Windows (win_amd64), Linux and macOS wheels for Python 3.10.
+
+numpy==1.26.4          # uf3 requires numpy <= 1.26.4
+pandas==2.2.2          # must be < 3 (uf3 writes HDF5 with positional args)
+scipy==1.14.0
+ase==3.23.0
+pymatgen==2024.7.18
+scikit-learn==1.5.1
+matplotlib==3.9.2
+tables==3.10.1
+h5py==3.16.0
+numba==0.68.0
+ndsplines==0.3.0
+psutil==7.2.2
+joblib==1.6.0
+threadpoolctl==3.7.0
+tqdm==4.70.1
+pyyaml==6.0.3
+plotly==7.1.0
+openpyxl==3.1.5
+
+# UF3Tools needs the uf-chenlab fork of uf3 (develop branch), not the PyPI
+# "uf3". Pinned to the commit this workflow was tested with (2025-11-13).
+# Needs git (if missing: conda install git). Without git, replace the line by
+#   uf3 @ https://github.com/uf-chenlab/uf3/archive/0c227afdec18c16a66d1ce695fe36c7cace34d90.zip
+uf3 @ git+https://github.com/uf-chenlab/uf3.git@0c227afdec18c16a66d1ce695fe36c7cace34d90

@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+# fit outputs and test data
+AlN_uf3_potential/
+test_potential/
+test_data/
+*.h5
+*.pkl
+coefficients_*.csv
+filtered_data.xlsx
+log.lammps
