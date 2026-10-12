@@ -54,7 +54,8 @@ def parse_args(argv=None):
     p.add_argument("--uf3tools", default=None,
                    help="folder of the UF3Tools code (the downloaded "
                         "repository or any folder above it). Default: "
-                        "installed UF3Tools, else " + default_dir)
+                        "search " + DEFAULT_FOLDER + ", the folder above "
+                        "this script's folder and the current folder")
     p.add_argument("--output-dir", default="AlN_uf3_potential",
                    help="folder for all results")
     p.add_argument("--name", default="AlN",
@@ -467,17 +468,17 @@ def main(argv=None):
     args = parse_args(argv)
     t_start = time.time()
     outcar_paths = [os.path.abspath(p) for p in args.outcar]
-    # UF3Tools location: --uf3tools, else DEFAULT_FOLDER, else an installed
-    # (pip install -e) UF3Tools, else the current folder
-    uf3tools = args.uf3tools
-    if uf3tools is None:
-        import importlib.util
-        if os.path.isdir(DEFAULT_FOLDER):
-            uf3tools = DEFAULT_FOLDER
-        elif importlib.util.find_spec("UF3Tools") is None:
-            uf3tools = "."
-    if uf3tools is not None:
-        uf3tools = os.path.abspath(uf3tools)
+    # Where to look for the UF3Tools code: --uf3tools, else DEFAULT_FOLDER,
+    # the folder above this repository and the current folder (an installed
+    # "pip install -e" UF3Tools is the last resort)
+    if args.uf3tools:
+        uf3tools = [os.path.abspath(args.uf3tools)]
+    else:
+        home = os.path.expanduser("~")
+        uf3tools = [d for d in (DEFAULT_FOLDER, os.path.dirname(HERE),
+                                os.getcwd())
+                    if os.path.isdir(d) and os.path.abspath(d) != home
+                    and os.path.dirname(os.path.abspath(d)) != d]
     out_dir = os.path.abspath(args.output_dir)
 
     print("== 1. Loading UF3Tools")

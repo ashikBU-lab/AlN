@@ -100,29 +100,101 @@ class _PlaceholderFinder(importlib.abc.MetaPathFinder):
         return None
 
 
-def find_uf3tools_package(search_root):
-    """Return the folder that contains UF3Tools' ``uf3_handler.py``.
+# Files of the UF3Tools source tree that uf3_handler.py imports. A plain
+# "pip install" of UF3Tools copies only __init__.py and uf3_handler.py (its
+# sub-folders have no __init__.py, so setuptools leaves them out); such a copy
+# fails with "No module named 'UF3Tools.simulations'".
+REQUIRED_FILES = (
+    "uf3_handler.py",
+    os.path.join("common", "UF3Utility.py"),
+    os.path.join("common", "StructureDownloader.py"),
+    os.path.join("simulations", "managers", "ValidationManager.py"),
+    os.path.join("simulations", "validations", "PotentialValidation.py"),
+)
+UF3TOOLS_URL = "https://github.com/uf-chenlab/UF3Tools.git"
+_SKIP_DIRS = {"__pycache__", "site-packages", "build", "dist", "node_modules",
+              "AppData", "anaconda3", "miniconda3", "envs", "Lib"}
 
-    ``search_root`` may be that folder itself, the cloned/unzipped repository
-    (``UF3Tools`` or ``UF3Tools-main``) or any folder above it (searched up to
-    4 levels deep).
-    """
+
+def missing_files(pkg_dir):
+    """Files of REQUIRED_FILES that are missing in pkg_dir."""
+    return [f for f in REQUIRED_FILES
+            if not os.path.isfile(os.path.join(pkg_dir, f))]
+
+
+def _candidate_dirs(search_root, max_depth=4):
+    """Folders containing uf3_handler.py at or below search_root."""
     search_root = os.path.abspath(os.path.expanduser(search_root))
-    if os.path.isfile(os.path.join(search_root, "uf3_handler.py")):
-        return search_root
+    if not os.path.isdir(search_root):
+        return
     base_depth = search_root.rstrip(os.sep).count(os.sep)
     for root, dirs, files in os.walk(search_root):
-        if root.count(os.sep) - base_depth >= 4:
+        if "uf3_handler.py" in files:
+            yield root
+        if root.count(os.sep) - base_depth >= max_depth:
             dirs[:] = []
             continue
         dirs[:] = sorted(d for d in dirs if not d.startswith(".")
-                         and d not in ("__pycache__", "site-packages"))
-        if "uf3_handler.py" in files and os.path.basename(root) == "UF3Tools":
-            return root
-    raise FileNotFoundError(
-        f"Could not find UF3Tools/uf3_handler.py under '{search_root}'. "
-        "Point --uf3tools to the folder where you cloned/unzipped "
-        "https://github.com/uf-chenlab/UF3Tools")
+                         and d not in _SKIP_DIRS
+                         and not d.endswith(".egg-info"))
+
+
+def _installed_uf3tools():
+    spec = importlib.util.find_spec("UF3Tools")
+    if spec is None or not spec.submodule_search_locations:
+        return None
+    return list(spec.submodule_search_locations)[0]
+
+
+def find_uf3tools_package(search_roots, use_installed=True):
+    """Return a *complete* UF3Tools package folder (the one that contains
+    uf3_handler.py, common/ and simulations/).
+
+    search_roots: folder or list of folders; each is searched up to 4 levels
+        deep (the downloaded repository, UF3Tools-main, or any folder above).
+    use_installed: fall back to an installed (pip install -e) UF3Tools.
+    """
+    if isinstance(search_roots, str):
+        search_roots = [search_roots]
+    roots = []
+    for r in search_roots or []:
+        r = os.path.abspath(os.path.expanduser(r))
+        if r not in roots:
+            roots.append(r)
+    complete, incomplete = [], []
+    for root in roots:
+        for d in _candidate_dirs(root):
+            if d in complete or d in incomplete:
+                continue
+            (incomplete if missing_files(d) else complete).append(d)
+    if use_installed:
+        d = _installed_uf3tools()
+        if d and d not in complete and d not in incomplete:
+            (incomplete if missing_files(d) else complete).append(d)
+    if complete:
+        # prefer a folder actually named UF3Tools
+        named = [d for d in complete if os.path.basename(d) == "UF3Tools"]
+        return (named or complete)[0]
+
+    lines = ["Could not find a complete copy of the UF3Tools code."]
+    if roots:
+        lines.append("Searched in:")
+        lines += [f"  {r}" for r in roots]
+    if incomplete:
+        lines.append("Found only incomplete copies (uf3_handler.py without "
+                     "its 'common' and 'simulations' folders):")
+        for d in incomplete:
+            lines.append(f"  {d}   missing: {', '.join(missing_files(d))}")
+        if any("site-packages" in d for d in incomplete):
+            lines.append("The one in site-packages comes from a plain "
+                         "'pip install' of UF3Tools; remove it with:\n"
+                         "  pip uninstall -y UF3Tools")
+    target = roots[0] if roots else os.getcwd()
+    lines += ["Download the complete UF3Tools code, e.g.:",
+              f'  cd "{target}"',
+              f"  git clone {UF3TOOLS_URL}",
+              "and run again (or pass --uf3tools \"<folder of UF3Tools>\")."]
+    raise FileNotFoundError("\n".join(lines))
 
 
 def _import_uf3():
@@ -147,22 +219,14 @@ def _import_uf3():
 def load_uf3_handler(uf3tools_path=None, verbose=True):
     """Import and return the ``UF3Tools.uf3_handler`` module.
 
-    uf3tools_path: folder of the UF3Tools code (see find_uf3tools_package).
-        If None, an installed UF3Tools (``pip install -e``) is used.
+    uf3tools_path: folder (or list of folders) to search for the UF3Tools
+        code, see find_uf3tools_package. An installed UF3Tools
+        (``pip install -e``) is used if nothing complete is found there.
     """
     if "UF3Tools.uf3_handler" in sys.modules:
         return sys.modules["UF3Tools.uf3_handler"]
     _import_uf3()
-
-    if uf3tools_path is None:
-        spec = importlib.util.find_spec("UF3Tools")
-        if spec is None or not spec.submodule_search_locations:
-            raise FileNotFoundError(
-                "UF3Tools not found. Pass --uf3tools <folder> or "
-                "'pip install -e' the UF3Tools repository.")
-        pkg_dir = list(spec.submodule_search_locations)[0]
-    else:
-        pkg_dir = find_uf3tools_package(uf3tools_path)
+    pkg_dir = find_uf3tools_package(uf3tools_path)
 
     # Register UF3Tools as a package without executing its __init__.py
     pkg = types.ModuleType("UF3Tools")
