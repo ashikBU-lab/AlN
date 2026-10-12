@@ -107,11 +107,16 @@ class _PlaceholderFinder(importlib.abc.MetaPathFinder):
 REQUIRED_FILES = (
     "uf3_handler.py",
     os.path.join("common", "UF3Utility.py"),
+    os.path.join("common", "MPAPIKey.py"),
     os.path.join("common", "StructureDownloader.py"),
+    os.path.join("common", "LAMMPSModifier.py"),
+    os.path.join("simulations", "common", "LammpsInputFileHandler.py"),
     os.path.join("simulations", "managers", "ValidationManager.py"),
+    os.path.join("simulations", "simulations", "Simulation.py"),
     os.path.join("simulations", "validations", "PotentialValidation.py"),
 )
 UF3TOOLS_URL = "https://github.com/uf-chenlab/UF3Tools.git"
+UF3TOOLS_ZIP = "https://github.com/uf-chenlab/UF3Tools (Code > Download ZIP)"
 _SKIP_DIRS = {"__pycache__", "site-packages", "build", "dist", "node_modules",
               "AppData", "anaconda3", "miniconda3", "envs", "Lib"}
 
@@ -140,10 +145,22 @@ def _candidate_dirs(search_root, max_depth=4):
 
 
 def _installed_uf3tools():
-    spec = importlib.util.find_spec("UF3Tools")
+    try:
+        spec = importlib.util.find_spec("UF3Tools")
+    except (ImportError, ValueError):
+        return None
     if spec is None or not spec.submodule_search_locations:
         return None
     return list(spec.submodule_search_locations)[0]
+
+
+def _download_advice(folder):
+    cd = "cd /d" if os.name == "nt" else "cd"
+    return ["Download the complete UF3Tools code:",
+            f'  {cd} "{folder}"',
+            f"  git clone {UF3TOOLS_URL}",
+            f"or get the ZIP from {UF3TOOLS_ZIP} and extract it there.",
+            "Then run again (or pass --uf3tools \"<folder of UF3Tools>\")."]
 
 
 def find_uf3tools_package(search_roots, use_installed=True):
@@ -159,6 +176,8 @@ def find_uf3tools_package(search_roots, use_installed=True):
     roots = []
     for r in search_roots or []:
         r = os.path.abspath(os.path.expanduser(r))
+        if os.path.isfile(r):  # e.g. the path of uf3_handler.py itself
+            r = os.path.dirname(r)
         if r not in roots:
             roots.append(r)
     complete, incomplete = [], []
@@ -179,21 +198,22 @@ def find_uf3tools_package(search_roots, use_installed=True):
     lines = ["Could not find a complete copy of the UF3Tools code."]
     if roots:
         lines.append("Searched in:")
-        lines += [f"  {r}" for r in roots]
+        for r in roots:
+            lines.append(f"  {r}" + ("" if os.path.isdir(r) else
+                         "   <- this folder does not exist (check the "
+                         "spelling; put the path in double quotes and do "
+                         "not end it with a backslash)"))
     if incomplete:
-        lines.append("Found only incomplete copies (uf3_handler.py without "
-                     "its 'common' and 'simulations' folders):")
-        for d in incomplete:
-            lines.append(f"  {d}   missing: {', '.join(missing_files(d))}")
+        lines.append("Found only incomplete copies (their 'common' and "
+                     "'simulations' folders are missing or incomplete; "
+                     "copying single files does not help):")
+        lines += [f"  {d}" for d in incomplete]
         if any("site-packages" in d for d in incomplete):
             lines.append("The one in site-packages comes from a plain "
                          "'pip install' of UF3Tools; remove it with:\n"
                          "  pip uninstall -y UF3Tools")
-    target = roots[0] if roots else os.getcwd()
-    lines += ["Download the complete UF3Tools code, e.g.:",
-              f'  cd "{target}"',
-              f"  git clone {UF3TOOLS_URL}",
-              "and run again (or pass --uf3tools \"<folder of UF3Tools>\")."]
+    existing = [r for r in roots if os.path.isdir(r)]
+    lines += _download_advice(existing[0] if existing else os.getcwd())
     raise FileNotFoundError("\n".join(lines))
 
 
@@ -233,6 +253,9 @@ def load_uf3_handler(uf3tools_path=None, verbose=True):
     pkg.__path__ = [pkg_dir]
     pkg.__file__ = os.path.join(pkg_dir, "__init__.py")
     pkg.__package__ = "UF3Tools"
+    pkg.__spec__ = importlib.machinery.ModuleSpec("UF3Tools", None,
+                                                  is_package=True)
+    pkg.__spec__.submodule_search_locations = pkg.__path__
     sys.modules["UF3Tools"] = pkg
 
     missing = [p for p in VALIDATION_ONLY_PACKAGES
@@ -241,6 +264,20 @@ def load_uf3_handler(uf3tools_path=None, verbose=True):
     sys.meta_path.append(finder)
     try:
         handler = importlib.import_module("UF3Tools.uf3_handler")
+    except BaseException as exc:
+        # undo the half-done import so that a retry starts from scratch
+        for name in [n for n in sys.modules
+                     if n == "UF3Tools" or n.startswith("UF3Tools.")]:
+            del sys.modules[name]
+        if (isinstance(exc, ModuleNotFoundError)
+                and (exc.name or "").startswith("UF3Tools")):
+            raise ImportError("\n".join(
+                [f"The UF3Tools copy in {pkg_dir} is incomplete "
+                 f"('{exc.name}' is missing). Delete it and use a complete "
+                 "download instead."]
+                + _download_advice(os.path.dirname(os.path.dirname(pkg_dir)))
+            )) from exc
+        raise
     finally:
         # Placeholders were only needed while importing UF3Tools.
         sys.meta_path.remove(finder)

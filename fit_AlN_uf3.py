@@ -463,27 +463,58 @@ run             1000
     return pair_style, f"pair_coeff * * {name}.uf3 Al N"
 
 
+def load_uf3tools(uf3tools_arg):
+    """Find and import UF3Tools; exit with a readable message on failure."""
+    import uf3tools_loader
+    if not hasattr(uf3tools_loader, "missing_files"):
+        sys.exit(f"ERROR: {uf3tools_loader.__file__} is an old version. "
+                 "Update fit_AlN_uf3.py and uf3tools_loader.py together "
+                 "(run 'git pull' in this folder).")
+
+    def norm(path):
+        return os.path.normcase(os.path.abspath(path))
+
+    # Where to look: --uf3tools, else DEFAULT_FOLDER, the folder above this
+    # repository, this folder and the current folder; never the home folder
+    # or the folder above it (too large). An installed "pip install -e"
+    # UF3Tools is the last resort.
+    if uf3tools_arg:
+        path = os.path.abspath(os.path.expanduser(uf3tools_arg))
+        if not os.path.exists(path):
+            sys.exit(f"ERROR: --uf3tools folder does not exist: {path}\n"
+                     "Check the spelling, put the path in double quotes and "
+                     "do not end it with a backslash.")
+        roots = [path]
+    else:
+        home = norm(os.path.expanduser("~"))
+        skip = {home, os.path.dirname(home)}
+        roots = []
+        for d in (DEFAULT_FOLDER, os.path.dirname(HERE), HERE, os.getcwd()):
+            if (os.path.isdir(d) and norm(d) not in skip
+                    and os.path.dirname(norm(d)) != norm(d)
+                    and norm(d) not in [norm(r) for r in roots]):
+                roots.append(d)
+    try:
+        return uf3tools_loader.load_uf3_handler(roots)
+    except (FileNotFoundError, ImportError) as exc:
+        hint = ""
+        if not roots:
+            hint = ("\nTip: put this AlN folder next to the UF3Tools "
+                    "download (see README, section 2), e.g.\n"
+                    f"  {os.path.dirname(DEFAULT_FOLDER)}\\AlN and "
+                    f"{DEFAULT_FOLDER}\\UF3Tools")
+        sys.exit(f"ERROR: {exc}{hint}")
+
+
 # --------------------------------------------------------------------------
 def main(argv=None):
     args = parse_args(argv)
     t_start = time.time()
     outcar_paths = [os.path.abspath(p) for p in args.outcar]
-    # Where to look for the UF3Tools code: --uf3tools, else DEFAULT_FOLDER,
-    # the folder above this repository and the current folder (an installed
-    # "pip install -e" UF3Tools is the last resort)
-    if args.uf3tools:
-        uf3tools = [os.path.abspath(args.uf3tools)]
-    else:
-        home = os.path.expanduser("~")
-        uf3tools = [d for d in (DEFAULT_FOLDER, os.path.dirname(HERE),
-                                os.getcwd())
-                    if os.path.isdir(d) and os.path.abspath(d) != home
-                    and os.path.dirname(os.path.abspath(d)) != d]
     out_dir = os.path.abspath(args.output_dir)
 
     print("== 1. Loading UF3Tools")
-    from uf3tools_loader import load_uf3_handler
-    handler = load_uf3_handler(uf3tools)
+    handler = load_uf3tools(args.uf3tools)
 
     print("\n== 2. Reading OUTCAR files")
     outcars = find_outcars(outcar_paths)

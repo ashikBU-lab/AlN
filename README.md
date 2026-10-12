@@ -38,6 +38,20 @@ phonolammps, mp-api, dask, optuna, pymongo ...). They are only used by its
 validation/HPC tools. `uf3tools_loader.py` imports just the fitting part of
 your UF3Tools copy.
 
+Download the UF3Tools code into your `code` folder (do **not**
+`pip install` it, see Troubleshooting):
+
+```bat
+cd "C:\Users\Mdashikur_Rahman1\Desktop\conda files\UF3TOOL\code"
+git clone https://github.com/uf-chenlab/UF3Tools.git
+```
+
+(or on https://github.com/uf-chenlab/UF3Tools click *Code → Download ZIP*
+and *Extract All* into the `code` folder).
+
+To get later updates of this repository: `cd` into the `AlN` folder and run
+`git pull`.
+
 ## 2. Put the files in place
 
 ```
@@ -152,6 +166,47 @@ python fit_AlN_uf3.py --outcar test_data --output-dir test_potential
 
 The toy model itself is not stable in the wurtzite structure, so don't
 read anything physical into `test_potential\lammps_test`.
+
+## Troubleshooting
+
+**`ModuleNotFoundError: No module named 'UF3Tools.simulations'`**
+
+Python is using an incomplete copy of UF3Tools that has `uf3_handler.py`
+but not its `common` and `simulations` folders. The usual cause is
+`pip install` of UF3Tools: its `setup.py` installs only `__init__.py` and
+`uf3_handler.py`. Fix:
+
+```bat
+conda activate uf3_aln
+pip uninstall -y UF3Tools
+cd "C:\Users\Mdashikur_Rahman1\Desktop\conda files\UF3TOOL\code"
+git clone https://github.com/uf-chenlab/UF3Tools.git
+cd "C:\Users\Mdashikur_Rahman1\Desktop\conda files\UF3TOOL\AlN"
+git pull
+python fit_AlN_uf3.py
+```
+
+(If `git clone` says the folder already exists, you already have a copy
+and can skip that line; the script tells you if that copy is incomplete.)
+
+`fit_AlN_uf3.py` itself only uses complete copies and otherwise prints
+which copy is incomplete and how to fix it. In your own notebook or script,
+do not `import UF3Tools` directly; load it like the fitting script does:
+
+```python
+import sys; sys.path.insert(0, r"C:\Users\Mdashikur_Rahman1\Desktop\conda files\UF3TOOL\AlN")
+from uf3tools_loader import load_uf3_handler
+uf3_handler = load_uf3_handler(r"C:\Users\Mdashikur_Rahman1\Desktop\conda files\UF3TOOL\code")
+```
+
+To see which copy a plain `import UF3Tools` would use:
+
+```bat
+python -c "import importlib.util as u; s=u.find_spec('UF3Tools'); print(s and list(s.submodule_search_locations))"
+```
+
+`None` means no installed copy (fine for `fit_AlN_uf3.py`). A path ending in
+`site-packages\UF3Tools` is the incomplete pip-installed copy.
 
 ## Notes on UF3Tools / uf3 issues handled by the script
 
