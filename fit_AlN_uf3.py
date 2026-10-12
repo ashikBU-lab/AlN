@@ -466,7 +466,7 @@ run             1000
 def load_uf3tools(uf3tools_arg):
     """Find and import UF3Tools; exit with a readable message on failure."""
     import uf3tools_loader
-    if not hasattr(uf3tools_loader, "missing_files"):
+    if getattr(uf3tools_loader, "LOADER_VERSION", 0) < 3:
         sys.exit(f"ERROR: {uf3tools_loader.__file__} is an old version. "
                  "Update fit_AlN_uf3.py and uf3tools_loader.py together "
                  "(run 'git pull' in this folder).")
@@ -475,35 +475,68 @@ def load_uf3tools(uf3tools_arg):
         return os.path.normcase(os.path.abspath(path))
 
     # Where to look: --uf3tools, else DEFAULT_FOLDER, the folder above this
-    # repository, this folder and the current folder; never the home folder
-    # or the folder above it (too large). An installed "pip install -e"
+    # repository, this folder and the current folder. The home folder, the
+    # folder above it and a drive root are too large to search: there only
+    # their UF3Tools* sub-folders are used. An installed "pip install -e"
     # UF3Tools is the last resort.
+    roots, advice_dir = [], None
+
+    def add(d):
+        if norm(d) not in [norm(r) for r in roots]:
+            roots.append(d)
+
     if uf3tools_arg:
         path = os.path.abspath(os.path.expanduser(uf3tools_arg))
         if not os.path.exists(path):
             sys.exit(f"ERROR: --uf3tools folder does not exist: {path}\n"
                      "Check the spelling, put the path in double quotes and "
                      "do not end it with a backslash.")
-        roots = [path]
+        add(path)
     else:
         home = norm(os.path.expanduser("~"))
         skip = {home, os.path.dirname(home)}
-        roots = []
         for d in (DEFAULT_FOLDER, os.path.dirname(HERE), HERE, os.getcwd()):
-            if (os.path.isdir(d) and norm(d) not in skip
-                    and os.path.dirname(norm(d)) != norm(d)
-                    and norm(d) not in [norm(r) for r in roots]):
-                roots.append(d)
+            if not os.path.isdir(d):
+                continue
+            too_high = (norm(d) == os.path.dirname(home)
+                        or os.path.dirname(norm(d)) == norm(d))
+            if advice_dir is None and not too_high:
+                advice_dir = d  # a download placed here will be found
+            if norm(d) in skip or os.path.dirname(norm(d)) == norm(d):
+                try:
+                    names = sorted(os.listdir(d))
+                except OSError:
+                    names = []
+                for name in names:
+                    sub = os.path.join(d, name)
+                    if name.lower().startswith("uf3tools") and os.path.isdir(sub):
+                        add(sub)
+            else:
+                add(d)
     try:
-        return uf3tools_loader.load_uf3_handler(roots)
-    except (FileNotFoundError, ImportError) as exc:
+        return uf3tools_loader.load_uf3_handler(roots, advice_dir=advice_dir)
+    except ModuleNotFoundError as exc:  # a missing third-party package
+        sys.exit(f"ERROR: {exc}\nA Python package is missing. In the uf3_aln "
+                 "environment run:\n  pip install -r requirements.txt\n"
+                 f"(or: pip install {exc.name})")
+    except FileNotFoundError as exc:
         hint = ""
-        if not roots:
-            hint = ("\nTip: put this AlN folder next to the UF3Tools "
-                    "download (see README, section 2), e.g.\n"
-                    f"  {os.path.dirname(DEFAULT_FOLDER)}\\AlN and "
-                    f"{DEFAULT_FOLDER}\\UF3Tools")
+        if not uf3tools_arg:
+            if os.name == "nt":
+                import ntpath
+                example = (
+                    f"  {ntpath.join(ntpath.dirname(DEFAULT_FOLDER), 'AlN')}"
+                    "   (this script)\n"
+                    f"  {ntpath.join(DEFAULT_FOLDER, 'UF3Tools')}"
+                    "   (the UF3Tools download)")
+            else:
+                example = ("  ~/UF3TOOL/AlN             (this script)\n"
+                           "  ~/UF3TOOL/code/UF3Tools   (the UF3Tools download)")
+            hint = ("\nTip: keep this AlN folder next to the UF3Tools "
+                    "download (README, section 2), e.g.\n" + example)
         sys.exit(f"ERROR: {exc}{hint}")
+    except ImportError as exc:
+        sys.exit(f"ERROR: {exc}")
 
 
 # --------------------------------------------------------------------------

@@ -115,6 +115,7 @@ REQUIRED_FILES = (
     os.path.join("simulations", "simulations", "Simulation.py"),
     os.path.join("simulations", "validations", "PotentialValidation.py"),
 )
+LOADER_VERSION = 3  # checked by fit_AlN_uf3.py (both files must match)
 UF3TOOLS_URL = "https://github.com/uf-chenlab/UF3Tools.git"
 UF3TOOLS_ZIP = "https://github.com/uf-chenlab/UF3Tools (Code > Download ZIP)"
 _SKIP_DIRS = {"__pycache__", "site-packages", "build", "dist", "node_modules",
@@ -154,22 +155,41 @@ def _installed_uf3tools():
     return list(spec.submodule_search_locations)[0]
 
 
-def _download_advice(folder):
+def _copy_root(pkg_dir):
+    """Top folder of a UF3Tools copy: the repository folder (with setup.py
+    or .git) around the package folder, else the package folder itself."""
+    parent = os.path.dirname(pkg_dir)
+    if any(os.path.exists(os.path.join(parent, f))
+           for f in ("setup.py", ".git")):
+        return parent
+    return pkg_dir
+
+
+def _download_advice(folder, remove=()):
     cd = "cd /d" if os.name == "nt" else "cd"
-    return ["Download the complete UF3Tools code:",
-            f'  {cd} "{folder}"',
-            f"  git clone {UF3TOOLS_URL}",
-            f"or get the ZIP from {UF3TOOLS_ZIP} and extract it there.",
-            "Then run again (or pass --uf3tools \"<folder of UF3Tools>\")."]
+    lines = []
+    remove = [r for r in remove if "site-packages" not in r]
+    if remove:
+        lines.append("First delete (or rename) the incomplete copy, otherwise "
+                     "the new download cannot use the same folder name:")
+        lines += [f"  {r}" for r in remove]
+    lines += ["Download the complete UF3Tools code:",
+              f'  {cd} "{folder}"',
+              f"  git clone {UF3TOOLS_URL}",
+              f"or get the ZIP from {UF3TOOLS_ZIP} and extract it there.",
+              "Then run again (or pass --uf3tools \"<folder of UF3Tools>\")."]
+    return lines
 
 
-def find_uf3tools_package(search_roots, use_installed=True):
+def find_uf3tools_package(search_roots, use_installed=True, advice_dir=None):
     """Return a *complete* UF3Tools package folder (the one that contains
     uf3_handler.py, common/ and simulations/).
 
     search_roots: folder or list of folders; each is searched up to 4 levels
         deep (the downloaded repository, UF3Tools-main, or any folder above).
     use_installed: fall back to an installed (pip install -e) UF3Tools.
+    advice_dir: folder suggested for a new download in the error message
+        (must be one that is searched); default: the first search folder.
     """
     if isinstance(search_roots, str):
         search_roots = [search_roots]
@@ -212,8 +232,13 @@ def find_uf3tools_package(search_roots, use_installed=True):
             lines.append("The one in site-packages comes from a plain "
                          "'pip install' of UF3Tools; remove it with:\n"
                          "  pip uninstall -y UF3Tools")
+    # Suggest downloading where the incomplete copy is (after removing it),
+    # else into advice_dir / the first search folder: places that are searched
+    local = [_copy_root(d) for d in incomplete if "site-packages" not in d]
     existing = [r for r in roots if os.path.isdir(r)]
-    lines += _download_advice(existing[0] if existing else os.getcwd())
+    target = (os.path.dirname(local[0]) if local else
+              advice_dir or (existing[0] if existing else os.getcwd()))
+    lines += _download_advice(target, remove=local)
     raise FileNotFoundError("\n".join(lines))
 
 
@@ -236,17 +261,18 @@ def _import_uf3():
             + UF3_FORK_INSTALL)
 
 
-def load_uf3_handler(uf3tools_path=None, verbose=True):
+def load_uf3_handler(uf3tools_path=None, verbose=True, advice_dir=None):
     """Import and return the ``UF3Tools.uf3_handler`` module.
 
     uf3tools_path: folder (or list of folders) to search for the UF3Tools
         code, see find_uf3tools_package. An installed UF3Tools
         (``pip install -e``) is used if nothing complete is found there.
+    advice_dir: folder suggested for a new download in error messages.
     """
     if "UF3Tools.uf3_handler" in sys.modules:
         return sys.modules["UF3Tools.uf3_handler"]
     _import_uf3()
-    pkg_dir = find_uf3tools_package(uf3tools_path)
+    pkg_dir = find_uf3tools_package(uf3tools_path, advice_dir=advice_dir)
 
     # Register UF3Tools as a package without executing its __init__.py
     pkg = types.ModuleType("UF3Tools")
@@ -271,11 +297,11 @@ def load_uf3_handler(uf3tools_path=None, verbose=True):
             del sys.modules[name]
         if (isinstance(exc, ModuleNotFoundError)
                 and (exc.name or "").startswith("UF3Tools")):
+            root = _copy_root(pkg_dir)
             raise ImportError("\n".join(
                 [f"The UF3Tools copy in {pkg_dir} is incomplete "
-                 f"('{exc.name}' is missing). Delete it and use a complete "
-                 "download instead."]
-                + _download_advice(os.path.dirname(os.path.dirname(pkg_dir)))
+                 f"('{exc.name}' is missing)."]
+                + _download_advice(os.path.dirname(root), remove=[root])
             )) from exc
         raise
     finally:
